@@ -8,11 +8,11 @@
 #include <avr/io.h>
 #include <util/twi.h>
 
-/*static*/ void i2c_wait() {
+static void i2c_wait() {
 	while ( !( TWCR & _BV( TWINT ) ) ) ;
 }
 
-/*static*/ void i2c_stop() {
+static void i2c_stop() {
 	TWCR = _BV( TWINT ) | _BV( TWSTO ) | _BV( TWEN );
 }
 
