@@ -6,13 +6,16 @@
  */
 
 #include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/sleep.h>
 #include <util/delay.h>
 #include <stdint.h>
 #include <util/twi.h>
 
 #include "spi_util.h"
-#include "max7219.h"
 #include "i2c_util.h"
+#include "max7219.h"
+#include "ds1307.h"
 
 #define LEDS_SS_DDB DDD5
 #define LEDS_SS PORTD5
@@ -23,20 +26,25 @@ void sendLeds( uint8_t leds ) {
 	PORTD |= _BV( LEDS_SS );
 }
 
+// empty timer interrupt
+EMPTY_INTERRUPT( TIMER0_COMPA_vect );
+
 int main() {
-//	uint8_t leds = 1;
+	uint8_t leds = 1;
 //	uint16_t count = 0;
 //	uint8_t digits[4];
-	uint8_t rtc_data[7];
+	uint8_t oldHour = -1, oldMin = -1, oldSec = -1;
+	ds1307_datetime dt;
 
 	// set up PB1, SCK and MOSI as outupts
 	// PB2 is the SS pin, must be output when operating as master
 	DDRB |= _BV( DDB1 ) | _BV( DDB5 ) | _BV( DDB3 ) | _BV( DDB2 );
 	PORTB &= ~_BV( PORTB1 );
 
-	// 595 and display slave selects
+	// 595 and display slave selects (outputs), timer clock (input)
 	DDRD |= _BV( LEDS_SS_DDB ) | _BV( DDD6 );
 	PORTD |= _BV( LEDS_SS ) | _BV( PORTD6 );
+	DDRD &= ~_BV( DDD4 );
 
 	// I2C pins
 	DDRC &= ~( _BV( DDC4 ) | _BV( DDC5 ) );
@@ -59,15 +67,55 @@ int main() {
 	MAX7219_SetDigit( 2, 9 );
 	MAX7219_SetDigit( 3, 9 );
 
+	DS1307_SetControl( DS1307_RS_4096HZ | DS1307_SQWE_ENABLE );
+
+	sendLeds( 0x55 );
+
+	// set up timer (fires @ 64 Hz)
+	// OC0A and OC0B disconnected, CTC mode
+	TCCR0A = 2;
+	// TCCR0B will be written last, since it is used to enable the timer
+	// 64 Hz frequency using external 4096 Hz clock
+	OCR0A = 63;
+	TCNT0 = 0;
+	// enable output compare A interrupt
+	TIMSK0 |= _BV( OCIE0A );
+	sei();
+	// start timer using external clock
+	TCCR0B = 7;
+
 	while ( 1 ) {
+
+		sleep_enable();
+		sleep_cpu();
+		sleep_disable();
+
 //		PORTB ^= _BV( PINB1 );
 
-//		sendLeds( leds );
+//		dt.hour = 0xFF;
+//		dt.minute = 0xFF;
 
-//		leds <<= 1;
-//		if ( !leds ) {
-//			leds = 1;
-//		}
+		DS1307_GetDateTime( &dt );
+		if ( dt.hour != oldHour || dt.minute != oldMin ) {
+			MAX7219_SetDigit( 0, ( dt.hour & 0x30 ) >> 4 );
+			MAX7219_SetDigit( 1, dt.hour & 0x0F );
+			MAX7219_SetDigit( 2, ( dt.minute & 0x70 ) >> 4 );
+			MAX7219_SetDigit( 3, dt.minute & 0x0F );
+
+			oldHour = dt.hour;
+			oldMin = dt.minute;
+		}
+
+		if ( dt.second != oldSec ) {
+			sendLeds( leds );
+
+			leds <<= 1;
+			if ( !leds ) {
+				leds = 1;
+			}
+
+			oldSec = dt.second;
+		}
 
 //		int temp = count;
 //		for ( int i = 3; i >= 0; i-- ) {
@@ -82,85 +130,6 @@ int main() {
 //			count = 0;
 //		}
 
-		sendLeds( 0b00000000 );
-
-		// write to RTC
-		i2c_begin( 0b1101000, 0 );
-
-		sendLeds( 0b10000000 );
-
-		// set register pointer to 0
-		i2c_write( 0, 1 );
-
-//		sendLeds( 0b11000000 );
-
-		// read from RTC
-		i2c_begin( 0b1101000, 1 );
-
-//		TWCR = _BV( TWINT ) | _BV( TWSTA ) | _BV( TWEN );
-//		MAX7219_SetDigit( 3, 1 );
-//		i2c_wait();
-//		MAX7219_SetDigit( 3, 2 );
-//		if ( TW_STATUS != TW_START ) {
-//			MAX7219_SetDigit( 3, 3 );
-//		} else {
-//			MAX7219_SetDigit( 3, 4 );
-//		}
-
-		// transmit slave address and data direction
-//		TWDR = ( 0b1101000 << 1 ) | 0x01;
-//		MAX7219_SetDigit( 3, 5 );
-//		TWCR = _BV( TWINT ) | _BV( TWEN );
-//		MAX7219_SetDigit( 3, 6 );
-//		i2c_wait();
-//		MAX7219_SetDigit( 3, 7 );
-//		if ( TW_STATUS != TW_MR_SLA_ACK ) {
-//			i2c_stop();
-//			MAX7219_SetDigit( 3, 8 );
-////			return -1;
-//		}
-
-
-//		sendLeds( 0b11100000 );
-
-		// read 6 bytes
-		for ( int i = 0; i < 6; i++ ) {
-//			rtc_data[i] = i2c_read( 0 );
-
-			uint8_t twcr = _BV( TWINT ) | _BV( TWEN ) | _BV( TWEA );
-//			if ( stop ) {
-//				twcr = _BV( TWINT ) | _BV( TWEN );
-//			}
-//			MAX7219_SetDigit( 3, 1 );
-
-			TWCR = twcr;
-//			MAX7219_SetDigit( 3, 2 );
-
-			i2c_wait();
-//			MAX7219_SetDigit( 3, 3 );
-
-//			uint8_t data = TWDR;
-			rtc_data[i] = TWDR;
-//			MAX7219_SetDigit( 3, 4 );
-
-			if ( TW_STATUS == TW_MR_DATA_NACK ) {
-				i2c_stop();
-			}
-//			MAX7219_SetDigit( 3, 5 );
-		}
-
-		sendLeds( 0b11110000 );
-
-		// read 7th byte and stop
-		rtc_data[6] = i2c_read( 1 );
-
-		sendLeds( 0b11111000 );
-
-		MAX7219_SetDigit( 0, ( rtc_data[2] & 0x30 ) >> 4 );
-		MAX7219_SetDigit( 1, rtc_data[2] & 0x0F );
-		MAX7219_SetDigit( 2, ( rtc_data[1] & 0x70 ) >> 4 );
-		MAX7219_SetDigit( 3, rtc_data[1] & 0x0F );
-
-		_delay_ms( 1000 );
+//		_delay_ms( 1000 );
 	}
 }
