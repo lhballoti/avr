@@ -5,8 +5,8 @@
  *      Author: Luiz
  */
 
-#ifndef BUTTON_MATRIX_H_
-#define BUTTON_MATRIX_H_
+#ifndef __BUTTON_MATRIX_H__
+#define __BUTTON_MATRIX_H__
 
 #include <stdint.h>
 
@@ -24,4 +24,8 @@ char ButtonMaxtrix_buttonStateChanged( uint8_t button );
 
 char ButtonMatrix_isPressed( uint8_t button );
 
-#endif /* BUTTON_MATRIX_H_ */
+char ButtonMatrix_wasPressed( uint8_t button );
+
+char ButtonMatrix_wasReleased( uint8_t button );
+
+#endif /* __BUTTON_MATRIX_H__ */

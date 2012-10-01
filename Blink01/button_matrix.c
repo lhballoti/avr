@@ -15,7 +15,7 @@
 #endif
 
 #define BUTTON_RESET 0xFF
-#define BUTTON_PRESSED 0xf0
+#define BUTTON_PRESSED 0xF0
 
 //#define CONCAT(a, b) __CONCAT(a, b)
 //#define __CONCAT(a, b) a ## b
@@ -93,9 +93,17 @@ char ButtonMatrix_stateChanged() {
 }
 
 char ButtonMatrix_isPressed( uint8_t button ) {
-	return ( buttonStates & ( 1 << button )  ) != 0;
+	return ( buttonStates & _BV( button )  ) != 0;
 }
 
 char ButtonMaxtrix_buttonStateChanged( uint8_t button ) {
-	return ( ( buttonStates ^ oldButtonStates ) & ( 1 << button ) ) != 0;
+	return ( ( buttonStates ^ oldButtonStates ) & _BV( button ) ) != 0;
+}
+
+char ButtonMatrix_wasPressed( uint8_t button ) {
+	return ( buttonStates & _BV( button ) ) && !( oldButtonStates & _BV( button ) );
+}
+
+char ButtonMatrix_wasReleased( uint8_t button ) {
+	return !( buttonStates & _BV( button ) ) && ( oldButtonStates & _BV( button ) );
 }
