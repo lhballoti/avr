@@ -21,6 +21,9 @@
 #define DS1307_RS_8192HZ	0x02
 #define DS1307_RS_32768HZ	0x03
 
+#define DS1307_RAM_START	0x08
+#define DS1307_RAM_END		0x3F
+
 typedef struct {
 	uint16_t year;
 	uint8_t month;
@@ -31,14 +34,16 @@ typedef struct {
 	uint8_t second;
 } ds1307_datetime;
 
+void DS1307_Start();
+
 void DS1307_GetDateTime( ds1307_datetime* dt );
 
 void DS1307_SetDateTime( ds1307_datetime* dt );
 
 void DS1307_SetControl( uint8_t ctrl );
 
-void DS1307_WriteRam( uint8_t* buf, uint8_t addr, uint8_t length );
+void DS1307_WriteRam( void* buf, uint8_t addr, uint8_t length );
 
-void DS1307_ReadRam( uint8_t* dst, uint8_t addr, uint8_t length );
+void DS1307_ReadRam( void* dst, uint8_t addr, uint8_t length );
 
 #endif /* DS1307_H_ */

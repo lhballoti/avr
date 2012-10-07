@@ -14,6 +14,7 @@ static void i2c_wait() {
 
 static void i2c_stop() {
 	TWCR = _BV( TWINT ) | _BV( TWSTO ) | _BV( TWEN );
+	while ( TWCR & _BV( TWSTO ) );
 }
 
 void i2c_init() {
