@@ -16,35 +16,41 @@
 #include "i2c_util.h"
 #include "max7219.h"
 #include "ds1307.h"
+#include "alarm_clock.h"
+#include "button_matrix.h"
 
-#define LEDS_SS_DDB DDD5
-#define LEDS_SS PORTD5
+#define BUTTON_ADJUST	8
+#define BUTTON_NEXT		7
+#define BUTTON_INCR		6
+#define BUTTON_DECR		5
 
-void sendLeds( uint8_t leds ) {
-	PORTD &= ~_BV( LEDS_SS );
-	spi_transfer( leds );
-	PORTD |= _BV( LEDS_SS );
-}
+#define UI_STATE_IDLE	0
+#define UI_STATE_WKDAY	1
+#define UI_STATE_HOUR	2
+#define UI_STATE_MINUTE	3
 
 // empty timer interrupt
 EMPTY_INTERRUPT( TIMER0_COMPA_vect );
+//ISR( TIMER0_COMPA_vect ) {
+//	PORTB ^= _BV( PORTB1 );
+//}
+
+//ISR( BADISR_vect ) {
+//	PORTB |= _BV( PORTB1 );
+//}
 
 int main() {
-	uint8_t leds = 1;
-//	uint16_t count = 0;
-//	uint8_t digits[4];
-	uint8_t oldHour = -1, oldMin = -1, oldSec = -1;
-	ds1307_datetime dt;
-
 	// set up PB1, SCK and MOSI as outupts
 	// PB2 is the SS pin, must be output when operating as master
 	DDRB |= _BV( DDB1 ) | _BV( DDB5 ) | _BV( DDB3 ) | _BV( DDB2 );
 	PORTB &= ~_BV( PORTB1 );
 
 	// 595 and display slave selects (outputs), timer clock (input)
-	DDRD |= _BV( LEDS_SS_DDB ) | _BV( DDD6 );
-	PORTD |= _BV( LEDS_SS ) | _BV( PORTD6 );
+	DDRD |= _BV( DDD5 ) | _BV( DDD6 );
+	PORTD |= _BV( PORTD5 ) | _BV( PORTD6 );
 	DDRD &= ~_BV( DDD4 );
+	// enable internal pull-up for clock input (RTC output is open-drain)
+	PORTD |= _BV( DDD4 );
 
 	// I2C pins
 	DDRC &= ~( _BV( DDC4 ) | _BV( DDC5 ) );
@@ -53,25 +59,24 @@ int main() {
 	// init SPI
 	SPCR = _BV( SPE ) | _BV( MSTR );
 	uint8_t x = SPSR;
-	x = SPDR;
+//	x = SPDR;
+	PORTD &= ~_BV( PORTD5 );
+	spi_transfer( 0 );
+	PORTD |= _BV( PORTD5 );
 
 	i2c_init();
+
+	ButtonMatrix_Init();
 
 	MAX7219_SetScanLimit( 0x3 );
 	MAX7219_SetDecodeMode( 0xF );
 	MAX7219_SetIntensity( 0xB );
 	MAX7219_Start();
 
-	MAX7219_SetDigit( 0, 9 );
-	MAX7219_SetDigit( 1, 9 );
-	MAX7219_SetDigit( 2, 9 );
-	MAX7219_SetDigit( 3, 9 );
-
 	DS1307_SetControl( DS1307_RS_4096HZ | DS1307_SQWE_ENABLE );
+	DS1307_Start();
 
-	sendLeds( 0x55 );
-
-	// set up timer (fires @ 64 Hz)
+	// set up timer 0 (fires @ 64 Hz)
 	// OC0A and OC0B disconnected, CTC mode
 	TCCR0A = 2;
 	// TCCR0B will be written last, since it is used to enable the timer
@@ -92,44 +97,38 @@ int main() {
 
 //		PORTB ^= _BV( PINB1 );
 
-//		dt.hour = 0xFF;
-//		dt.minute = 0xFF;
+		AlarmClock_Tick();
 
-		DS1307_GetDateTime( &dt );
-		if ( dt.hour != oldHour || dt.minute != oldMin ) {
-			MAX7219_SetDigit( 0, ( dt.hour & 0x30 ) >> 4 );
-			MAX7219_SetDigit( 1, dt.hour & 0x0F );
-			MAX7219_SetDigit( 2, ( dt.minute & 0x70 ) >> 4 );
-			MAX7219_SetDigit( 3, dt.minute & 0x0F );
+		if ( ButtonMatrix_stateChanged() ) {
 
-			oldHour = dt.hour;
-			oldMin = dt.minute;
-		}
-
-		if ( dt.second != oldSec ) {
-			sendLeds( leds );
-
-			leds <<= 1;
-			if ( !leds ) {
-				leds = 1;
+			switch ( ui_state ) {
+				case UI_STATE_IDLE:
+					if ( ButtonMatrix_isPressed( BUTTON_ADJUST ) ) {
+						ui_state = UI_STATE_WKDAY;
+						AlarmClock_StartAdjust( ALARM_CLOCK_TIME );
+					}
+					break;
+				case UI_STATE_WKDAY:
+				case UI_STATE_HOUR:
+				case UI_STATE_MINUTE:
+					if ( ButtonMatrix_wasPressed( BUTTON_INCR ) ) {
+						AlarmClock_IncrementField();
+					} else if ( ButtonMatrix_wasPressed( BUTTON_DECR ) ) {
+						AlarmClock_DecrementField();
+					} else if ( ButtonMatrix_wasPressed( BUTTON_NEXT ) ) {
+						if ( ui_state < UI_STATE_MINUTE ) {
+							ui_state++;
+						} else {
+							ui_state = UI_STATE_WKDAY;
+						}
+						AlarmClock_NextField();
+					} else if ( ButtonMatrix_wasReleased( BUTTON_ADJUST ) ) {
+						AlarmClock_EndAdjust();
+						ui_state = UI_STATE_IDLE;
+					}
+					break;
 			}
 
-			oldSec = dt.second;
 		}
-
-//		int temp = count;
-//		for ( int i = 3; i >= 0; i-- ) {
-//			digits[i] = temp % 10;
-//			temp /= 10;
-//		}
-//		for ( int i = 0; i < 4; i++ ) {
-//			MAX7219_SetDigit( i, digits[i] );
-//		}
-//		count++;
-//		if ( count == 10000 ) {
-//			count = 0;
-//		}
-
-//		_delay_ms( 1000 );
 	}
 }
