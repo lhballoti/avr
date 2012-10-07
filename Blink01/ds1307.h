@@ -31,14 +31,16 @@ typedef struct {
 	uint8_t second;
 } ds1307_datetime;
 
+void DS1307_Start();
+
 void DS1307_GetDateTime( ds1307_datetime* dt );
 
 void DS1307_SetDateTime( ds1307_datetime* dt );
 
 void DS1307_SetControl( uint8_t ctrl );
 
-void DS1307_WriteRam( uint8_t* buf, uint8_t addr, uint8_t length );
+void DS1307_WriteRam( void* buf, uint8_t addr, uint8_t length );
 
-void DS1307_ReadRam( uint8_t* dst, uint8_t addr, uint8_t length );
+void DS1307_ReadRam( void* dst, uint8_t addr, uint8_t length );
 
 #endif /* DS1307_H_ */
