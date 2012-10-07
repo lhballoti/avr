@@ -8,7 +8,7 @@
 #ifndef __MAX7219_H__
 #define __MAX7219_H__
 
-#define MAX7219_DIGIT_OFF	0x0F
+#define MAX7219_DIGIT_OFF	0xFF
 
 #define MAX7219_SS_PORT PORTD
 #define MAX7219_SS_PIN PORTD6

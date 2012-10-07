@@ -7,7 +7,6 @@
 
 #include <avr/io.h>
 #include <stdint.h>
-#include <stdlib.h>
 
 #include "alarm_clock.h"
 #include "spi_util.h"
@@ -43,25 +42,12 @@
 #define WEEK_WEEKENDS	( WEEK_SAT | WEEK_SUN )
 #define WEEK_EVERYDAY	( WEEK_MON | WEEK_TUE | WEEK_WED | WEEK_THU | WEEK_FRI | WEEK_SAT | WEEK_SUN )
 
-#define NUMERIC_NONE	( ( MAX7219_DIGIT_OFF << 4 ) | MAX7219_DIGIT_OFF )
-
-#define STATUS_MASK_ENABLE		0x80
-// used to repeat alarm after a few minutes
-#define STATUS_MASK_ONGOING		0x40
-// remaining repeat count
-#define STATUS_MASK_COUNT		0x38
-// beep for the current repetition
-#define STATUS_MASK_BEEPS		0x07
-
-// repeat interval in minutes
-#define ALARM_REPEAT_INTERVAL	8
-
-typedef struct {
-	uint8_t status;
+struct alarm_entry {
+	uint8_t enabled;
 	uint8_t wkday;
 	uint8_t hours;
 	uint8_t minutes;
-} alarm_entry;
+};
 
 const uint8_t weekdays_opts[] = {
 	WEEK_MON,
@@ -82,9 +68,10 @@ static uint8_t curr_setting = -1;
 static uint8_t show_field_timer = -1;
 static uint8_t curr_field = FIELD_NONE;
 static uint8_t curr_wkday = WEEK_NONE;
-static uint8_t curr_hour = NUMERIC_NONE;
-static uint8_t curr_min = NUMERIC_NONE;
-//static Alarm_Callback alarm_callback = NULL;
+static uint8_t curr_hour = MAX7219_DIGIT_OFF;
+static uint8_t curr_min = MAX7219_DIGIT_OFF;
+
+static struct alarm_entry alarm_entries[ALARM_CLOCK_TIMER_2 + 1];
 
 static void sendLeds( uint8_t leds ) {
 	LEDS_SS_PORT &= ~_BV( LEDS_SS_PIN );
@@ -131,19 +118,10 @@ static void hideCurrentField() {
 }
 
 static void loadSetting( int setting ) {
-	if ( setting != ALARM_CLOCK_TIME ) {
-		alarm_entry ae;
-		DS1307_ReadRam( &ae, DS1307_RAM_START + ( setting - 1 ) * sizeof( ae ), sizeof( ae ) );
-		curr_wkday = ae.wkday;
-		curr_hour = ae.hours;
-		curr_min = ae.minutes;
-	} else {
-		ds1307_datetime dt;
-		DS1307_GetDateTime( &dt );
-		curr_wkday = dt.wkday - 1;
-		curr_hour = dt.hour;
-		curr_min = dt.minute;
-	}
+	struct alarm_entry ae = alarm_entries[curr_setting];
+	curr_wkday = ae.wkday;
+	curr_hour = ae.hours;
+	curr_min = ae.minutes;
 	sendLeds( weekdays_opts[curr_wkday] );
 	MAX7219_SetDigit( 0, BCD_TENS( curr_hour ) );
 	MAX7219_SetDigit( 1, BCD_ONES( curr_hour ) );
@@ -151,19 +129,17 @@ static void loadSetting( int setting ) {
 	MAX7219_SetDigit( 3, BCD_ONES( curr_min ) );
 }
 
-static void showTime( ds1307_datetime* dt ) {
-	uint8_t leds = 1 << dt->wkday;
-	leds += dt->second & 0x01;
+static void showTime() {
+	ds1307_datetime dt;
+	DS1307_GetDateTime( &dt );
+	uint8_t leds = 1 << dt.wkday;
+	leds += dt.second & 0x01;
 	sendLeds( leds );
-	MAX7219_SetDigit( 0, BCD_TENS( dt->hour & 0x30 ) );
-	MAX7219_SetDigit( 1, BCD_ONES( dt->hour ) );
-	MAX7219_SetDigit( 2, BCD_TENS( dt->minute & 0x70 ) );
-	MAX7219_SetDigit( 3, BCD_ONES( dt->minute ) );
+	MAX7219_SetDigit( 0, BCD_TENS( dt.hour & 0x30 ) );
+	MAX7219_SetDigit( 1, BCD_ONES( dt.hour ) );
+	MAX7219_SetDigit( 2, BCD_TENS( dt.minute & 0x70 ) );
+	MAX7219_SetDigit( 3, BCD_ONES( dt.minute ) );
 }
-
-//void AlarmClock_SetAlarmCallback( Alarm_Callback callback ) {
-//	alarm_callback = callback;
-//}
 
 void AlarmClock_Tick() {
 	ticks++;
@@ -176,9 +152,7 @@ void AlarmClock_Tick() {
 		} else if ( show_field_timer ) {
 			show_field_timer--;
 			// expired? hide field
-			if ( !show_field_timer ) {
-				hideCurrentField();
-			}
+			if ( !show_field_timer ) { hideCurrentField(); }
 		}
 	}
 	if ( ticks == TICKS_PER_SECOND ) {
@@ -186,9 +160,7 @@ void AlarmClock_Tick() {
 		if ( is_adjusting ) {
 			showCurrentField();
 		} else {
-			ds1307_datetime dt;
-			DS1307_GetDateTime( &dt );
-			showTime( &dt );
+			showTime();
 		}
 	}
 }
@@ -205,7 +177,6 @@ void AlarmClock_StartAdjust( int setting ) {
 	is_adjusting = 1;
 	curr_setting = setting;
 	curr_field = FIELD_WEEKDAY;
-	show_field_timer = SHOW_FIELD_DELAY;
 	loadSetting( curr_setting );
 }
 
@@ -215,7 +186,7 @@ void AlarmClock_IncrementField() {
 		case FIELD_WEEKDAY:
 			curr_wkday++;
 			// alarms can be set to more than one day of week
-			uint8_t wkmax = ( curr_setting == ALARM_CLOCK_TIME ) ? 7 : sizeof( weekdays_opts );
+			uint8_t wkmax = ( curr_setting == ALARM_CLOCK_TIME ) ? 6 : sizeof( weekdays_opts );
 			if ( curr_wkday >= wkmax ) {
 				curr_wkday = 0;
 			}
@@ -284,26 +255,12 @@ void AlarmClock_NextField() {
 }
 
 void AlarmClock_EndAdjust() {
-	ds1307_datetime dt;
-	DS1307_GetDateTime( &dt );
-	if ( curr_setting != ALARM_CLOCK_TIME ) {
-		alarm_entry ae;
-		ae.status = STATUS_MASK_ENABLE;
-		ae.wkday = curr_wkday;
-		ae.hours = curr_hour;
-		ae.minutes = curr_min;
-		DS1307_WriteRam( &ae, DS1307_RAM_START + ( curr_setting - 1 ) * sizeof( ae ), sizeof( ae ) );
-	} else {
-		// DS1307 weekdays start at 1
-		dt.wkday = curr_wkday + 1;
-		dt.hour = curr_hour;
-		dt.minute = curr_min;
-		DS1307_SetDateTime( &dt );
-	}
-	is_adjusting = 0;
+	struct alarm_entry* ae = &( alarm_entries[curr_setting] );
+	ae->wkday = curr_wkday;
+	ae->hours = curr_hour;
+	ae->minutes = curr_min;
 	curr_setting = -1;
+	is_adjusting = 0;
 	curr_field = FIELD_NONE;
-	curr_hour = NUMERIC_NONE;
-	curr_min = NUMERIC_NONE;
-	showTime( &dt );
+	showTime();
 }
