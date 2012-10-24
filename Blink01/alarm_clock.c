@@ -46,15 +46,13 @@
 #define NUMERIC_NONE	( ( MAX7219_DIGIT_OFF << 4 ) | MAX7219_DIGIT_OFF )
 
 #define STATUS_MASK_ENABLE		0x80
-// used to repeat alarm after a few minutes
-#define STATUS_MASK_ONGOING		0x40
-// remaining repeat count
-#define STATUS_MASK_COUNT		0x38
-// beep for the current repetition
-#define STATUS_MASK_BEEPS		0x07
+// remaining alarm check count
+#define STATUS_MASK_COUNT		0x7F
 
 // repeat interval in minutes
 #define ALARM_REPEAT_INTERVAL	8
+// repeat count before the alarm is disabled
+#define ALARM_REPEAT_COUNT		10
 
 typedef struct {
 	uint8_t status;
@@ -62,6 +60,8 @@ typedef struct {
 	uint8_t hours;
 	uint8_t minutes;
 } alarm_entry;
+
+#define AE_SIZE	sizeof( alarm_entry )
 
 const uint8_t weekdays_opts[] = {
 	WEEK_MON,
@@ -84,7 +84,7 @@ static uint8_t curr_field = FIELD_NONE;
 static uint8_t curr_wkday = WEEK_NONE;
 static uint8_t curr_hour = NUMERIC_NONE;
 static uint8_t curr_min = NUMERIC_NONE;
-//static Alarm_Callback alarm_callback = NULL;
+static Alarm_Callback alarm_callback = NULL;
 
 static void sendLeds( uint8_t leds ) {
 	LEDS_SS_PORT &= ~_BV( LEDS_SS_PIN );
@@ -133,7 +133,7 @@ static void hideCurrentField() {
 static void loadSetting( int setting ) {
 	if ( setting != ALARM_CLOCK_TIME ) {
 		alarm_entry ae;
-		DS1307_ReadRam( &ae, ( setting - 1 ) * sizeof( ae ), sizeof( ae ) );
+		DS1307_ReadRam( &ae, ( setting - 1 ) * AE_SIZE, AE_SIZE );
 		curr_wkday = ae.wkday;
 		curr_hour = ae.hours;
 		curr_min = ae.minutes;
@@ -161,9 +161,38 @@ static void showTime( ds1307_datetime* dt ) {
 	MAX7219_SetDigit( 3, BCD_ONES( dt->minute ) );
 }
 
-//void AlarmClock_SetAlarmCallback( Alarm_Callback callback ) {
-//	alarm_callback = callback;
-//}
+static uint8_t checkAlarms( ds1307_datetime* dt ) {
+	uint8_t setting;
+	uint8_t alarm = 0xFF;
+	alarm_entry ae;
+	for ( setting = ALARM_CLOCK_ALARM_0; setting <= ALARM_CLOCK_ALARM_0; setting++ ) {
+		DS1307_ReadRam( &ae, ( setting - 1 ) * AE_SIZE, AE_SIZE );
+		// check for alarm match
+		if ( ( ae.status & STATUS_MASK_ENABLE ) &&
+				( weekdays_opts[ae.wkday] & _BV( dt->wkday ) )
+				&& ( ae.hours == dt->hour ) && ( ae.minutes == dt->minute ) ) {
+			// start repeat count
+			ae.status |= ALARM_REPEAT_COUNT * ALARM_REPEAT_INTERVAL;
+			DS1307_WriteRam( &ae, ( setting - 1 ) * AE_SIZE, AE_SIZE );
+			if ( alarm == 0xFF ) {
+				alarm = setting;
+			}
+		}
+		// check if it's time to repeat the alarm
+		else if ( ae.status > STATUS_MASK_ENABLE ) {
+			ae.status--;
+			DS1307_WriteRam( &ae, ( setting - 1 ) * AE_SIZE, AE_SIZE );
+			if ( ( ( ae.status & ~STATUS_MASK_ENABLE ) % ALARM_REPEAT_INTERVAL ) == 0 && alarm == 0xFF ) {
+				alarm = setting;
+			}
+		}
+	}
+	return alarm;
+}
+
+void AlarmClock_SetAlarmCallback( Alarm_Callback callback ) {
+	alarm_callback = callback;
+}
 
 void AlarmClock_Tick() {
 	ticks++;
@@ -189,19 +218,25 @@ void AlarmClock_Tick() {
 			ds1307_datetime dt;
 			DS1307_GetDateTime( &dt );
 			showTime( &dt );
+			if ( dt.second == 0x00 && alarm_callback != NULL ) {
+				uint8_t ala = checkAlarms( &dt );
+				if ( ala != 0xFF ) {
+					( *alarm_callback )( ala );
+				}
+			}
 		}
 	}
 }
 
-void AlarmClock_Enable( int setting ) {
+void AlarmClock_Enable( uint8_t setting ) {
 
 }
 
-void AlarmClock_Disable( int setting ) {
+void AlarmClock_Disable( uint8_t setting ) {
 
 }
 
-void AlarmClock_StartAdjust( int setting ) {
+void AlarmClock_StartAdjust( uint8_t setting ) {
 	is_adjusting = 1;
 	curr_setting = setting;
 	curr_field = FIELD_WEEKDAY;
@@ -292,7 +327,7 @@ void AlarmClock_EndAdjust() {
 		ae.wkday = curr_wkday;
 		ae.hours = curr_hour;
 		ae.minutes = curr_min;
-		DS1307_WriteRam( &ae, ( curr_setting - 1 ) * sizeof( ae ), sizeof( ae ) );
+		DS1307_WriteRam( &ae, ( curr_setting - 1 ) * AE_SIZE, AE_SIZE );
 	} else {
 		// DS1307 weekdays start at 1
 		dt.wkday = curr_wkday + 1;

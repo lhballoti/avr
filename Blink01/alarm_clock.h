@@ -19,19 +19,19 @@
 #define LEDS_SS_PORT	PORTD
 #define LEDS_SS_PIN		PORTD5
 
-//typedef void (*Alarm_Callback)( uint8_t, uint8_t );
+typedef void (*Alarm_Callback)( uint8_t );
 
 void AlarmClock_Tick();
 
-//void AlarmClock_SetAlarmCallback( Alarm_Callback callback );
+void AlarmClock_SetAlarmCallback( Alarm_Callback callback );
 
-void AlarmClock_Enable( int setting );
+void AlarmClock_Enable( uint8_t setting );
 
-void AlarmClock_Disable( int setting );
+void AlarmClock_Disable( uint8_t setting );
 
-void AlarmClock_Stop( int setting );
+void AlarmClock_Stop( uint8_t setting );
 
-void AlarmClock_StartAdjust( int setting );
+void AlarmClock_StartAdjust( uint8_t setting );
 
 void AlarmClock_IncrementField();
 
